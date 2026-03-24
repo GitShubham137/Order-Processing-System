@@ -1,0 +1,31 @@
+{
+  "name": "order-processing-system",
+  "version": "1.0.0",
+  "description": "Production-grade order processing system using Kafka, Redis, and Microservices",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "shared"
+  ],
+  "scripts": {
+    "start:auth": "npm run start --workspace=services/auth-service",
+    "start:order": "npm run start --workspace=services/order-service",
+    "start:payment": "npm run start --workspace=services/payment-service",
+    "start:inventory": "npm run start --workspace=services/inventory-service",
+    "start:notification": "npm run start --workspace=services/notification-service",
+    "dev:auth": "npm run dev --workspace=services/auth-service",
+    "dev:order": "npm run dev --workspace=services/order-service",
+    "dev:payment": "npm run dev --workspace=services/payment-service",
+    "dev:inventory": "npm run dev --workspace=services/inventory-service",
+    "dev:notification": "npm run dev --workspace=services/notification-service",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}

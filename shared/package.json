@@ -1,0 +1,14 @@
+{
+  "name": "@ops/shared",
+  "version": "1.0.0",
+  "description": "Shared utilities for order-processing-system services",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2",
+    "kafkajs": "^2.2.4",
+    "winston": "^3.11.0"
+  }
+}
