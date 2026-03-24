@@ -19,7 +19,7 @@ const paymentSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
-      default: 'INR',
+      default: 'inr',
     },
     status: {
       type: String,
@@ -27,20 +27,18 @@ const paymentSchema = new mongoose.Schema(
       default: 'initiated',
       index: true,
     },
-    // Razorpay specific fields
-    razorpayOrderId: {
+    stripePaymentIntentId: {
       type: String,
       default: null,
     },
-    razorpayPaymentId: {
+    stripeClientSecret: {
       type: String,
       default: null,
     },
-    razorpaySignature: {
+    stripePaymentId: {
       type: String,
       default: null,
     },
-    // Failure tracking
     failureReason: {
       type: String,
       default: null,
@@ -49,7 +47,6 @@ const paymentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    // Idempotency — prevent duplicate processing
     idempotencyKey: {
       type: String,
       unique: true,
@@ -61,7 +58,6 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
-// ─── Indexes for common queries ───────────────────────────────────────────────
 paymentSchema.index({ orderId: 1, status: 1 });
 paymentSchema.index({ userId: 1, createdAt: -1 });
 

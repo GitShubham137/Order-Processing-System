@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 3003;
 const start = async () => {
   await connectDB();
 
-  // Start Kafka consumer to listen for order.created events
   await startOrderConsumer();
 
   app.listen(PORT, () => {
@@ -17,7 +16,6 @@ const start = async () => {
   });
 };
 
-// ─── Graceful shutdown ───────────────────────────────────────────────────────
 const shutdown = async (signal) => {
   logger.info(`${signal} received — shutting down gracefully`);
   await kafkaClient.disconnectProducer();

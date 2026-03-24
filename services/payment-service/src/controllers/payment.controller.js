@@ -1,10 +1,9 @@
 const Payment = require('../models/payment.model');
-const { verifyPaymentSignature } = require('../config/razorpay');
+const { verifyWebhookSignature } = require('../config/stripe');
 const { kafkaClient, logger } = require('@ops/shared');
 const { TOPICS } = require('@ops/shared').topics;
 const { NotFoundError, ValidationError, ForbiddenError } = require('@ops/shared').errorHandler;
 
-// ─── Get payment by order ID ─────────────────────────────────────────────────
 const getPaymentByOrder = async (req, res, next) => {
   try {
     const payment = await Payment.findOne({ orderId: req.params.orderId });
@@ -13,7 +12,6 @@ const getPaymentByOrder = async (req, res, next) => {
       return next(new NotFoundError('Payment not found for this order'));
     }
 
-    // Users can only view their own payments
     if (payment.userId !== req.user.id && req.user.role !== 'admin') {
       return next(new ForbiddenError('You do not have access to this payment'));
     }
@@ -24,7 +22,6 @@ const getPaymentByOrder = async (req, res, next) => {
   }
 };
 
-// ─── Get all payments (admin) ────────────────────────────────────────────────
 const getAllPayments = async (req, res, next) => {
   try {
     const page  = parseInt(req.query.page)  || 1;
@@ -50,57 +47,80 @@ const getAllPayments = async (req, res, next) => {
   }
 };
 
-// ─── Razorpay webhook — verify and confirm payment ───────────────────────────
-// In production this endpoint is called by Razorpay after payment completes
+
 const handleWebhook = async (req, res, next) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const signature = req.headers['stripe-signature'];
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return next(new ValidationError('Missing Razorpay webhook fields'));
+    let event;
+    try {
+      event = verifyWebhookSignature(req.body, signature);
+    } catch (err) {
+      logger.warn('Invalid Stripe webhook signature', { err: err.message });
+      return res.status(400).json({ error: 'Invalid signature' });
     }
 
-    // Verify the signature
-    const isValid = verifyPaymentSignature({
-      razorpayOrderId:   razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-    });
+    switch (event.type) {
+      case 'payment_intent.succeeded': {
+        const intent  = event.data.object;
+        const payment = await Payment.findOne({ stripePaymentIntentId: intent.id });
 
-    if (!isValid) {
-      logger.warn('Invalid Razorpay signature', { razorpay_order_id });
-      return next(new ValidationError('Invalid payment signature'));
+        if (payment) {
+          payment.status            = 'success';
+          payment.stripePaymentId   = intent.id;
+          await payment.save();
+
+          await kafkaClient.publishEvent(TOPICS.PAYMENT_PROCESSED, {
+            id:                    payment._id.toString(),
+            type:                  'PAYMENT_CONFIRMED',
+            orderId:               payment.orderId,
+            userId:                payment.userId,
+            paymentId:             payment._id.toString(),
+            stripePaymentIntentId: intent.id,
+            amount:                payment.amount,
+            processedAt:           new Date().toISOString(),
+          });
+
+          logger.info('Stripe webhook: payment confirmed', {
+            paymentId: payment._id,
+            orderId:   payment.orderId,
+          });
+        }
+        break;
+      }
+
+      case 'payment_intent.payment_failed': {
+        const intent  = event.data.object;
+        const payment = await Payment.findOne({ stripePaymentIntentId: intent.id });
+
+        if (payment) {
+          payment.status        = 'failed';
+          payment.failureReason = intent.last_payment_error?.message || 'Payment failed';
+          await payment.save();
+
+          await kafkaClient.publishEvent(TOPICS.PAYMENT_FAILED, {
+            id:        payment._id.toString(),
+            type:      'PAYMENT_FAILED',
+            orderId:   payment.orderId,
+            userId:    payment.userId,
+            paymentId: payment._id.toString(),
+            reason:    payment.failureReason,
+            failedAt:  new Date().toISOString(),
+          });
+
+          logger.warn('Stripe webhook: payment failed', {
+            paymentId: payment._id,
+            orderId:   payment.orderId,
+          });
+        }
+        break;
+      }
+
+      default:
+        logger.debug(`Unhandled Stripe event type: ${event.type}`);
     }
 
-    // Find and update payment record
-    const payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id });
-    if (!payment) {
-      return next(new NotFoundError('Payment record not found'));
-    }
-
-    payment.razorpayPaymentId = razorpay_payment_id;
-    payment.razorpaySignature = razorpay_signature;
-    payment.status            = 'success';
-    await payment.save();
-
-    // Publish confirmed payment event
-    await kafkaClient.publishEvent(TOPICS.PAYMENT_PROCESSED, {
-      id:               payment._id.toString(),
-      type:             'PAYMENT_CONFIRMED',
-      orderId:          payment.orderId,
-      userId:           payment.userId,
-      paymentId:        payment._id.toString(),
-      razorpayPaymentId: razorpay_payment_id,
-      amount:           payment.amount,
-      processedAt:      new Date().toISOString(),
-    });
-
-    logger.info('Razorpay webhook verified and payment confirmed', {
-      paymentId: payment._id,
-      orderId:   payment.orderId,
-    });
-
-    res.status(200).json({ success: true, message: 'Payment confirmed' });
+    res.status(200).json({ received: true });
   } catch (err) {
     next(err);
   }
